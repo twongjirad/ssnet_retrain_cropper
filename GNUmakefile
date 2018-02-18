@@ -1,4 +1,9 @@
 
+# compiler
+CXX = g++
+
+CXXFLAGS = -g -fPIC
+
 # include options for this package
 INCFLAGS  = -I.
 INCFLAGS += $(shell root-config --cflags)
@@ -27,6 +32,8 @@ LDFLAGS += -lLArOpenCV_ImageClusterAlgoFunction
 LDFLAGS += -lLArOpenCV_ImageClusterAlgoData
 LDFLAGS += -lLArOpenCV_ImageClusterAlgoClass
 
+CXXFLAGS += $(INCFLAGS)
+
 # note: llcvprocessor headers and libraries are in larlitecv/build/include and lib
 #LDFLAGS += -l
 
@@ -35,10 +42,20 @@ OSNAME          = $(shell uname -s)
 HOST            = $(shell uname -n)
 OSNAMEMODE      = $(OSNAME)
 
+PROGRAMS = make_ssnet_vertexcrop
+PROGSRC = $(addsuffix .cxx, $(PROGRAMS) )
+SRCS = $(filter-out $(PROGSRC),$(wildcard *.cxx))
+OBJS = $(addprefix obj/,$(patsubst %.cxx, %.o, $(SRCS)))
+BINS  = $(addprefix bin/,$(PROGRAMS))
+
+all: $(OBJS) $(BINS)
 
 
-all: make_ssnet_vertexcrop
+clean:
+	rm $(BINS)
 
-make_ssnet_vertexcrop: make_ssnet_vertexcrop.cxx
-	g++ -g -fPIC $(INCFLAGS) make_ssnet_vertexcrop.cxx -o make_ssnet_vertexcrop $(LDFLAGS)
+bin/%: %.cxx $(OBJS)
+	$(CXX) $(CXXFLAGS) $*.cxx -o $@ $(OBJS) $(LDFLAGS)
 
+obj/%.o: %.cxx
+	$(CXX) $(CXXFLAGS) -c $*.cxx -o $@
