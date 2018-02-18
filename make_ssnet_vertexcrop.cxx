@@ -86,26 +86,28 @@ int main( int nargs, char** argv ) {
     int event  = llcv_proc.dataco().event();
 
     // sync up with supera/mcinfo
-    //dataco.goto_event( run, subrun, event, "larlite" );
+    dataco.goto_event( run, subrun, event, "larlite" );
 
     // get event vertex vector
     auto & vtxdata = driver.GetEventVertexData();
     auto & imgdata = driver.GetEventImageData();
     std::cout << "  number of vertices in event: " << vtxdata.size() << std::endl;
 
-    // operations
-    // make N random vertices
-    
-    // if vertex, slip those in as well
-
-    // crop adc, instance, and ancestor around vertex
+    // get data
+    larlitecv::DataCoordinator& inputdataco = llcv_proc.dataco();    
 
     // adc images (event-wise)
-    larlitecv::DataCoordinator& inputdataco = llcv_proc.dataco();
     larcv::EventImage2D* ev_img_v = (larcv::EventImage2D*)dataco.get_larcv_data( larcv::kProductImage2D, "wire" );
-    std::cout << "evimg: " << ev_img_v << std::endl;
+
+    // instance ID images
+    larcv::EventImage2D* ev_id_v  = (larcv::EventImage2D*)dataco.get_larcv_data( larcv::kProductImage2D, "instance" );
+    larcv::EventImage2D* ev_mom_v = (larcv::EventImage2D*)dataco.get_larcv_data( larcv::kProductImage2D, "ancestor" );
+
+    // mctrack/mcshower info
+    larlite::event_mctrack* ev_tracks   = (larlite::event_mctrack*)dataco.get_larlite_data( larlite::data::kMCTrack, "mcreco" );
+    larlite::event_mcshower* ev_showers = (larlite::event_mcshower*)dataco.get_larlite_data( larlite::data::kMCShower, "mcreco" );    
+
     const std::vector<larcv::Image2D>& img_v = ev_img_v->Image2DArray();
-    std::cout << "images: " << img_v.size() << std::endl;
 
     if ( img_v.size()==0 )
       continue;
@@ -124,7 +126,9 @@ int main( int nargs, char** argv ) {
     for ( int iroi=0; iroi<nroi; iroi++) {
 
       // set the output event container
-      larcv::EventImage2D* ev_out = (larcv::EventImage2D*)outlarcv.get_data( larcv::kProductImage2D, "adc" );
+      larcv::EventImage2D* ev_out    = (larcv::EventImage2D*)outlarcv.get_data( larcv::kProductImage2D, "adc" );
+      larcv::EventImage2D* ev_label  = (larcv::EventImage2D*)outlarcv.get_data( larcv::kProductImage2D, "label" );
+      larcv::EventImage2D* ev_weight = (larcv::EventImage2D*)outlarcv.get_data( larcv::kProductImage2D, "weight" );      
 
       larcv::ROI& roi = roi_v.at(iroi);
 
@@ -134,13 +138,18 @@ int main( int nargs, char** argv ) {
       // crop the image
       for ( auto const& img : img_v ) {
 
-	larcv::Image2D cropped = img.crop( roi.BB( img.meta().plane() ) );
-
-	std::cout << "cropped: " << cropped.meta().dump() << std::endl;
-	
+	larcv::Image2D cropped = img.crop( roi.BB( img.meta().plane() ) );	
 	ev_out->Emplace( std::move(cropped) );
       }
 
+      std::vector<larcv::Image2D> label_v;
+      std::vector<larcv::Image2D> weight_v;      
+      make_cropped_label_image( ev_out->Image2DArray(), ev_id_v->Image2DArray(), ev_mom_v->Image2DArray(),
+				*ev_tracks, *ev_showers, 5.0, label_v, weight_v );
+				
+      ev_label->Emplace( std::move(label_v) );
+      ev_weight->Emplace( std::move( weight_v) );
+      
       // set the entry number
       outlarcv.set_id( run, subrun, event*10 + iroi );
 

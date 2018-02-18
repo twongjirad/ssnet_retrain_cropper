@@ -130,7 +130,8 @@ std::vector< larcv::ROI > generate_regions( const int rows, const int cols,
 }
 
 
-void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs, const std::vector<larcv::Image2D>& idimgs,
+void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs,
+			       const std::vector<larcv::Image2D>& idimgs, const std::vector<larcv::Image2D>& momimgs,
 			       const std::vector<larlite::mctrack>& mctracks, const std::vector<larlite::mcshower>& mcshowers,
 			       const float adcthreshold,
 			       std::vector<larcv::Image2D>& labelimg_v, std::vector<larcv::Image2D>& weightimg_v ) {
@@ -162,6 +163,7 @@ void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs, c
 
     int numshowerpix = 0;
     int numtrackpix  = 0;
+    int numnoisepix  = 0;
 
     larcv::Image2D weight( croppedimgs.at(p).meta() );
     weight.paint(0);
@@ -171,11 +173,16 @@ void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs, c
     const larcv::ImageMeta& adcmeta = adcimg.meta();
 
     // image where pixels contain track ID of particle responsible for largest energy deposition
-    const larcv::Image2D& idimg    = idimgs.at(p);
+    const larcv::Image2D& idimg    = idimgs.at(p);      
+    const larcv::Image2D& momimg   = momimgs.at(p);
     const larcv::ImageMeta& idmeta = idimg.meta();
 
-    // loop over rows and columns of the ssnetmeta, as it is a subset
-    for (size_t radc=0; radc<adcimg.meta().rows(); radc++) {
+    std::map< int, int > idcounter;
+    std::map< int, int > idlabel;
+    std::map< int, int > idmom;    
+
+    // loop over rows and columns of the cropped adc image, as it is a subset
+    for (size_t radc=0; radc<adcmeta.rows(); radc++) {
 
       // we have to translate to the bigger image as well
       // we get the absolute coordinate value (tick,wire)
@@ -184,10 +191,10 @@ void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs, c
       // then go and get the row,col in the full adc image
       int rid = idmeta.row(tick);
       
-      for (size_t cadc=0; cadc<ssnetmeta.cols(); cadc++) {
+      for (size_t cadc=0; cadc<adcmeta.cols(); cadc++) {
 	// same thing for the x-axis (wires)
 	float wire = adcmeta.pos_x( cadc );
-	int cid   = idmeta.col(wire);	  
+	int cid    = idmeta.col(wire);	  
 	
 	// get the adc value
 	float adc = adcimg.pixel(radc,cadc);
@@ -197,7 +204,17 @@ void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs, c
 	  continue;
 
 	// get the track id
-	int id = (int)idimg.pixel(rid,cid);
+	int id  = (int)idimg.pixel(rid,cid);
+	int mom = (int)momimg.pixel(rid,cid);
+
+	if ( idcounter.find(id)==idcounter.end() ) {
+	  idcounter.insert( std::pair<int,int>(id,0) );
+	  idlabel.insert( std::pair<int,int>(id,-1) );
+	  idmom.insert( std::pair<int,int>(id,-1) );	  
+	}
+	idcounter[id]++;
+	idmom[id] = mom;
+
 	
 	bool istrack = false;
 	bool isshower = false;
@@ -208,23 +225,47 @@ void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs, c
 	  isshower = true;
 	}
 
-	if ( !istrack && !isshower ) {
-	  if (id!=-1)
-	    isshower = true; // above threshold, ID-less energy deposition. probably shower
-	}
+	// if ( id!=-1 && !istrack && !isshower ) {
+	//   isshower = true; // above threshold, ID-less energy deposition. probably shower
+	// }
 
 	if ( istrack ) {
 	  label.set_pixel( radc, cadc, 2.0 );
-	  numtrackpixel++;
+	  idlabel[id] = 2;
+	  numtrackpix++;
 	}
 	else if (isshower ) {
 	  label.set_pixel( radc, cadc, 1.0 );
-	  numshowerpixel++;
+	  idlabel[id] = 1;
+	  numshowerpix++;
 	}
+	else {
+
+	  if ( id>=0 && mom>0 ) {
+	    label.set_pixel( radc, cadc, 2.0 );
+	    numtrackpix++;	    
+	    idlabel[id] = 2;
+	  }
+	  else if ( id>=0 && mom<0 ) {
+	    label.set_pixel( radc, cadc, 1.0 );
+	    numshowerpix++;	    
+	    idlabel[id] = 1;
+	  }
+	  else {
+	    label.set_pixel( radc, cadc, 3.0 );
+	    idlabel[id] = 3;
+	    numnoisepix++;
+	  }
+	}
+	     
 	
       }//end of col loop
     }//end of row loop
 
+    std::cout << "[ID Count]" << std::endl;
+    for ( auto &it : idcounter ) {
+      std::cout << "  (" << it.first << ") " << it.second << " label=" << idlabel[it.first] << " ancestorid=" << idmom[it.first] << std::endl;
+    }
 
     /// weight image. we go 1/(numx)
 
@@ -232,12 +273,15 @@ void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs, c
     float trackweight  = 1.0;
     float showerweight = 1.0;
     float bgweight     = 1.0;
+    float noiseweight  = 1.0;
     if ( numshowerpix>0 )
       showerweight = 1.0/float(numshowerpix);
     if ( numtrackpix>0 )
       trackweight = 1.0/float(numtrackpix);
     if ( numbg>0 )
       bgweight = 1.0/float(numbg);
+    if ( numnoisepix>0 )
+      noiseweight = 1.0/float(numnoisepix);
     
     for (size_t radc=0; radc<adcmeta.rows(); radc++) {
       for (size_t cadc=0; cadc<adcmeta.cols(); cadc++) {
@@ -246,6 +290,8 @@ void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs, c
 	  weight.set_pixel( radc, cadc, showerweight );
 	else if ( lbl==2.0 )
 	  weight.set_pixel( radc, cadc, trackweight );
+	else if (lbl==3.0 )
+	  weight.set_pixel( radc, cadc, noiseweight );
 	else
 	  weight.set_pixel( radc, cadc, bgweight );
       }
