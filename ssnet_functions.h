@@ -16,7 +16,8 @@ std::vector< larcv::ROI > generate_regions( const int rows, const int cols,
 					    const int num_regions, const std::vector<float>& min_occupany_fraction, const std::vector<float>& thresholds,
 					    const int maxattempts, const int randseed );
 
-std::vector<larcv::Image2D> make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs, const std::vector<larcv::Image2D>& idimgs,
-						      const std::vector<larlite::mctrack>& mctrack, const std::vector<larlite::mcshower>& mcshower,
-						      const float adcthreshold );
+void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs, const std::vector<larcv::Image2D>& idimgs,
+			       const std::vector<larlite::mctrack>& mctracks, const std::vector<larlite::mcshower>& mcshowers,
+			       const float adcthreshold,
+			       std::vector<larcv::Image2D>& labelimg_v, std::vector<larcv::Image2D>& weightimg_v );
 

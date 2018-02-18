@@ -130,13 +130,132 @@ std::vector< larcv::ROI > generate_regions( const int rows, const int cols,
 }
 
 
-std::vector<larcv::Image2D> make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs, const std::vector<larcv::Image2D>& idimgs,
-						      const std::vector<larlite::mctrack>& mctrack, const std::vector<larlite::mcshower>& mcshower,
-						      const float adcthreshold ) {
+void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs, const std::vector<larcv::Image2D>& idimgs,
+			       const std::vector<larlite::mctrack>& mctracks, const std::vector<larlite::mcshower>& mcshowers,
+			       const float adcthreshold,
+			       std::vector<larcv::Image2D>& labelimg_v, std::vector<larcv::Image2D>& weightimg_v ) {
+  
   // loop over mctrack and shower and collect IDs
   // loop over cropped image range and label above threshold pixels
   // for pixels with IDs not in the mcshower nor mctrack, it's almost certainly a low energy gamma, so label as shower
   //    might check neighbors and if track, then isolated shower is probably not a good idea for label, so change
   // for pixels with no id, but above threshold, check nearest pixel in time (probably due to deconv)
+
+  std::set<int> showerids;
+  std::set<int> trackids;
+  for ( auto const& track : mctracks ) {
+    trackids.insert( track.TrackID() );
+  }
+  for ( auto const& shower : mcshowers ) {
+    showerids.insert( shower.TrackID() );
+  }
+
+  labelimg_v.clear();
+  weightimg_v.clear();
+  
+  // loop over the planes
+  for (int p=0; p<3; p++) {
+    
+    // make output weight and label image
+    larcv::Image2D label( croppedimgs.at(p).meta() );
+    label.paint(0);
+
+    int numshowerpix = 0;
+    int numtrackpix  = 0;
+
+    larcv::Image2D weight( croppedimgs.at(p).meta() );
+    weight.paint(0);
+    
+    // get the adc image for the plane. the container stores all three planes. we grab plane p.
+    const larcv::Image2D& adcimg    = croppedimgs.at(p);
+    const larcv::ImageMeta& adcmeta = adcimg.meta();
+
+    // image where pixels contain track ID of particle responsible for largest energy deposition
+    const larcv::Image2D& idimg    = idimgs.at(p);
+    const larcv::ImageMeta& idmeta = idimg.meta();
+
+    // loop over rows and columns of the ssnetmeta, as it is a subset
+    for (size_t radc=0; radc<adcimg.meta().rows(); radc++) {
+
+      // we have to translate to the bigger image as well
+      // we get the absolute coordinate value (tick,wire)
+      float tick = adcmeta.pos_y( radc );
+
+      // then go and get the row,col in the full adc image
+      int rid = idmeta.row(tick);
+      
+      for (size_t cadc=0; cadc<ssnetmeta.cols(); cadc++) {
+	// same thing for the x-axis (wires)
+	float wire = adcmeta.pos_x( cadc );
+	int cid   = idmeta.col(wire);	  
+	
+	// get the adc value
+	float adc = adcimg.pixel(radc,cadc);
+
+	// if below threshold, skip, not interesting
+	if ( adc<adcthreshold )
+	  continue;
+
+	// get the track id
+	int id = (int)idimg.pixel(rid,cid);
+	
+	bool istrack = false;
+	bool isshower = false;
+	if ( trackids.find(id)!=trackids.end() ) {
+	  istrack = true;
+	}
+	if ( showerids.find(id)!=showerids.end() ) {
+	  isshower = true;
+	}
+
+	if ( !istrack && !isshower ) {
+	  if (id!=-1)
+	    isshower = true; // above threshold, ID-less energy deposition. probably shower
+	}
+
+	if ( istrack ) {
+	  label.set_pixel( radc, cadc, 2.0 );
+	  numtrackpixel++;
+	}
+	else if (isshower ) {
+	  label.set_pixel( radc, cadc, 1.0 );
+	  numshowerpixel++;
+	}
+	
+      }//end of col loop
+    }//end of row loop
+
+
+    /// weight image. we go 1/(numx)
+
+    int numbg = adcmeta.rows()*adcmeta.cols() - numshowerpix - numtrackpix;
+    float trackweight  = 1.0;
+    float showerweight = 1.0;
+    float bgweight     = 1.0;
+    if ( numshowerpix>0 )
+      showerweight = 1.0/float(numshowerpix);
+    if ( numtrackpix>0 )
+      trackweight = 1.0/float(numtrackpix);
+    if ( numbg>0 )
+      bgweight = 1.0/float(numbg);
+    
+    for (size_t radc=0; radc<adcmeta.rows(); radc++) {
+      for (size_t cadc=0; cadc<adcmeta.cols(); cadc++) {
+	int lbl = label.pixel(radc,cadc);
+	if ( lbl==1.0 )
+	  weight.set_pixel( radc, cadc, showerweight );
+	else if ( lbl==2.0 )
+	  weight.set_pixel( radc, cadc, trackweight );
+	else
+	  weight.set_pixel( radc, cadc, bgweight );
+      }
+    }
+
+    labelimg_v.emplace_back(  std::move(label)  );
+    weightimg_v.emplace_back( std::move(weight) );
+    
+  }// end of plane loop
+
+
 }
 
