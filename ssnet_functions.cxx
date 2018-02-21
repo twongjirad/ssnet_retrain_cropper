@@ -262,14 +262,14 @@ void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs,
       }//end of col loop
     }//end of row loop
 
-    std::cout << "[ID Count]" << std::endl;
-    for ( auto &it : idcounter ) {
-      std::cout << "  (" << it.first << ") " << it.second << " label=" << idlabel[it.first] << " ancestorid=" << idmom[it.first] << std::endl;
-    }
+    // std::cout << "[ID Count]" << std::endl;
+    // for ( auto &it : idcounter ) {
+    //   std::cout << "  (" << it.first << ") " << it.second << " label=" << idlabel[it.first] << " ancestorid=" << idmom[it.first] << std::endl;
+    // }
 
     /// weight image. we go 1/(numx)
 
-    int numbg = adcmeta.rows()*adcmeta.cols() - numshowerpix - numtrackpix;
+    int numbg = adcmeta.rows()*adcmeta.cols() - numshowerpix - numtrackpix - numnoisepix;
     float trackweight  = 1.0;
     float showerweight = 1.0;
     float bgweight     = 1.0;

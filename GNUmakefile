@@ -42,7 +42,7 @@ OSNAME          = $(shell uname -s)
 HOST            = $(shell uname -n)
 OSNAMEMODE      = $(OSNAME)
 
-PROGRAMS = make_ssnet_vertexcrop
+PROGRAMS = make_ssnet_vertexcrop make_ssnet_vertexcrop_intertool
 PROGSRC = $(addsuffix .cxx, $(PROGRAMS) )
 SRCS = $(filter-out $(PROGSRC),$(wildcard *.cxx))
 OBJS = $(addprefix obj/,$(patsubst %.cxx, %.o, $(SRCS)))
