@@ -29,7 +29,7 @@ std::vector< larcv::ROI > generate_regions( const int rows, const int cols,
   const larutil::Geometry* geo = larutil::Geometry::GetME();
   const larutil::LArProperties* larp = larutil::LArProperties::GetME();
 
-  std::cout << "defining crop regions for source image with: (" << sourceimg_meta.rows() << "," << sourceimg_meta.cols() << ")" << std::endl;
+  //std::cout << "defining crop regions for source image with: (" << sourceimg_meta.rows() << "," << sourceimg_meta.cols() << ")" << std::endl;
   
   TRandom3 rand( seed );
   int numattempts = 0;
@@ -120,9 +120,9 @@ std::vector< larcv::ROI > generate_regions( const int rows, const int cols,
       roi_v.emplace_back( std::move(roi) );
     }
     numattempts++;
-    std::cout << "attempt " << numattempts << " planes_passing=" << planes_passing << std::endl;
-    for (int p=0; p<3; p++)
-      std::cout << "  occupancy plane " << p << ": " << occfrac[p] << std::endl;
+    // std::cout << "attempt " << numattempts << " planes_passing=" << planes_passing << std::endl;
+    // for (int p=0; p<3; p++)
+    //   std::cout << "  occupancy plane " << p << ": " << occfrac[p] << std::endl;
     
   }//end of attempt loop
 
@@ -179,7 +179,8 @@ void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs,
 
     std::map< int, int > idcounter;
     std::map< int, int > idlabel;
-    std::map< int, int > idmom;    
+    std::map< int, int > idmom;
+    std::map< int, int > inmcreco;
 
     // loop over rows and columns of the cropped adc image, as it is a subset
     for (size_t radc=0; radc<adcmeta.rows(); radc++) {
@@ -210,19 +211,21 @@ void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs,
 	if ( idcounter.find(id)==idcounter.end() ) {
 	  idcounter.insert( std::pair<int,int>(id,0) );
 	  idlabel.insert( std::pair<int,int>(id,-1) );
-	  idmom.insert( std::pair<int,int>(id,-1) );	  
+	  idmom.insert( std::pair<int,int>(id,-1) );
+	  inmcreco.insert( std::pair<int,int>(id,0) );
 	}
 	idcounter[id]++;
 	idmom[id] = mom;
 
-	
 	bool istrack = false;
 	bool isshower = false;
 	if ( trackids.find(id)!=trackids.end() ) {
 	  istrack = true;
+	  inmcreco[id] = 1;
 	}
 	if ( showerids.find(id)!=showerids.end() ) {
 	  isshower = true;
+	  inmcreco[id] = 1;	  
 	}
 
 	// if ( id!=-1 && !istrack && !isshower ) {
@@ -230,28 +233,39 @@ void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs,
 	// }
 
 	if ( istrack ) {
+	  // TRACK
 	  label.set_pixel( radc, cadc, 2.0 );
 	  idlabel[id] = 2;
 	  numtrackpix++;
 	}
 	else if (isshower ) {
+	  // SHOWER
 	  label.set_pixel( radc, cadc, 1.0 );
 	  idlabel[id] = 1;
 	  numshowerpix++;
 	}
 	else {
 
-	  if ( id>=0 && mom>0 ) {
-	    label.set_pixel( radc, cadc, 2.0 );
-	    numtrackpix++;	    
-	    idlabel[id] = 2;
-	  }
-	  else if ( id>=0 && mom<0 ) {
+	  // if ( id>=0 && mom>0 ) {
+	  //   label.set_pixel( radc, cadc, 2.0 );
+	  //   numtrackpix++;	    
+	  //   idlabel[id] = 2;
+	  // }
+	  // else if ( id>=0 && mom<0 ) {
+	  //   label.set_pixel( radc, cadc, 1.0 );
+	  //   numshowerpix++;	    
+	  //   idlabel[id] = 1;
+	  // }
+	  if ( id>=0 ) {
+	    // not in mctrack, mcshower but has ID
+	    // LOW ENERGY GAMMA
 	    label.set_pixel( radc, cadc, 1.0 );
 	    numshowerpix++;	    
 	    idlabel[id] = 1;
 	  }
 	  else {
+	    // not in mctrack, mcshower, no ID (no mother)
+	    // NOISE
 	    label.set_pixel( radc, cadc, 3.0 );
 	    idlabel[id] = 3;
 	    numnoisepix++;
@@ -264,9 +278,62 @@ void make_cropped_label_image( const std::vector<larcv::Image2D>& croppedimgs,
 
     // std::cout << "[ID Count]" << std::endl;
     // for ( auto &it : idcounter ) {
-    //   std::cout << "  (" << it.first << ") " << it.second << " label=" << idlabel[it.first] << " ancestorid=" << idmom[it.first] << std::endl;
+    //   std::cout << "  (" << it.first << ") " << it.second << " inmcreco=" << inmcreco[it.first] << " label=" << idlabel[it.first] << " ancestorid=" << idmom[it.first] << std::endl;
     // }
 
+    // 2nd pass. we label short, spotty deltas as track
+    numshowerpix = 0;
+    numtrackpix  = 0;
+    numnoisepix  = 0;
+    
+    for ( size_t p=0; p<3; p++ ) {
+      // loop over rows and columns of the cropped adc image, as it is a subset
+      for (size_t radc=0; radc<adcmeta.rows(); radc++) {
+	
+	// we have to translate to the bigger image as well
+	// we get the absolute coordinate value (tick,wire)
+	float tick = adcmeta.pos_y( radc );
+
+	// then go and get the row,col in the full adc image
+	int rid = idmeta.row(tick);
+      
+	for (size_t cadc=0; cadc<adcmeta.cols(); cadc++) {
+	  // same thing for the x-axis (wires)
+	  float wire = adcmeta.pos_x( cadc );
+	  int cid    = idmeta.col(wire);	  
+	
+	  // get the adc value
+	  float adc = adcimg.pixel(radc,cadc);
+	  
+	  // if below threshold, skip, not interesting
+	  if ( adc<adcthreshold )
+	    continue;
+
+	  // get the track id
+	  int id  = (int)idimg.pixel(rid,cid);
+	  int current_label = (int)label.pixel(radc,cadc);
+	  int mom = (int)momimg.pixel(rid,cid);
+
+
+	  int numpixid = idcounter[id];
+
+	  if ( current_label==1 && numpixid<20 && mom>0 ) {
+	    // change to track
+	    current_label = 2;
+	    label.set_pixel( radc, cadc, current_label );
+	  }
+
+	  if ( current_label==1 )
+	    numshowerpix++;
+	  else if ( current_label==2 )
+	    numtrackpix++;
+	  else if ( current_label==3 )
+	    numnoisepix++;
+
+	} //end of col loop
+      }// end of row loow
+    }
+    
     /// weight image. we go 1/(numx)
 
     int numbg = adcmeta.rows()*adcmeta.cols() - numshowerpix - numtrackpix - numnoisepix;

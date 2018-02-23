@@ -38,6 +38,7 @@ int main( int nargs, char** argv ) {
   outlarcv.initialize();
   
   int nentries = dataco.get_nentries( "larcv" );
+  nentries = 3;
   
   for ( int i=0; i<nentries; i++) {
     dataco.goto_entry(i,"larcv");
